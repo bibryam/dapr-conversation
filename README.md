@@ -1,23 +1,22 @@
-Based on the blog content provided, I'll enhance the README to better explain the behavior and expected outcomes without repeating too much from the blog. Here's the updated complete README:
-
 # Dapr Conversation API Examples
 
-This repository demonstrates how to use Dapr's Conversation API to interact with LLMs (Large Language Models) through a consistent interface. These examples complement the blog post "Building Reliable LLM Applications with Dapr Conversation API" and showcase various capabilities including basic interactions, secure configurations, PII protection, resiliency patterns, and tracing.
+![Overview diagram](images/overview.png)
+
+This repository demonstrates how to use Dapr's Conversation API to interact with LLMs (Large Language Models). These examples complement the blog post "Operationalizing LLM Interactions with Dapr's New Conversation API" and showcase various capabilities including basic interactions, secure configurations, PII protection, resiliency patterns, monitoring, and tracing.
 
 ## Prerequisites
-
-- [Dapr CLI](https://docs.dapr.io/getting-started/install-dapr-cli/) (v1.12.0+)
 - [Docker](https://docs.docker.com/get-docker/)
-- [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (for .NET examples)
+- [Dapr CLI](https://docs.dapr.io/getting-started/install-dapr-cli/) (v1.15+)
 - [REST Client extension](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) (for VS Code) or cURL
+- [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (for .NET examples only)
 
 ## 1. Basic Conversation with Echo Component
 
-The Echo component provides a simple way to test your Conversation API configuration without requiring external API credentials.
+The Echo component provides a simple way to test your Conversation API configuration without requiring external API credentials. It returns the prompt it is given.
 
 ### Configuration
 
-The Echo component is defined in `components/echo.yaml`:
+The Echo component is defined in [`components/echo.yaml`](./components/echo.yaml):
 
 ```yaml
 apiVersion: dapr.io/v1alpha1
@@ -29,9 +28,9 @@ spec:
   version: v1
 ```
 
-### Running the Echo Component
+### Running the Echo Example
 
-Start a Dapr sidecar with the Echo component:
+Start a Dapr sidecar with the Echo component in the project directory. The Dapr sidecar is a process that runs alongside your application and provides the Dapr APIs.
 
 ```bash
 dapr run --app-id test-echo --resources-path ./components --dapr-http-port 3500 -- tail -f
@@ -39,7 +38,7 @@ dapr run --app-id test-echo --resources-path ./components --dapr-http-port 3500 
 
 ### Interacting with the Echo Component
 
-Send a request to the Conversation API using the REST client or cURL:
+Send a request to the Conversation API using the REST client as configured in the [`http/test.rest`](./http/test.rest) file:
 
 ```http
 POST http://localhost:3500/v1.0-alpha1/conversation/echo/converse
@@ -56,13 +55,13 @@ Content-Type: application/json
 
 **Expected Outcome**: The Echo component will mirror your input message back to you, confirming that your request was properly formatted and the Conversation API is working correctly.
 
-## 2. Using OpenAI with .NET SDK
+## 2. Using a Real LLM Provider with OpenAI
 
-This example demonstrates using a real LLM provider through the strongly-typed .NET SDK.
+After testing with the Echo component, let's switch to a real LLM provider. The OpenAI component configuration allows you to connect to OpenAI's models with minimal setup.
 
 ### Configuration
 
-The OpenAI component is defined in `components/openai.yaml`:
+The OpenAI component is defined in [`components/openai.yaml`](./components/openai.yaml):
 
 ```yaml
 apiVersion: dapr.io/v1alpha1
@@ -80,31 +79,46 @@ spec:
       value: 10m
 ```
 
-### Running the .NET Application
+Simply replace `<OPENAI_API_KEY>` with your actual API key. The `cacheTTL` parameter enables Dapr to cache responses for 10 minutes, reducing costs and improving performance for repeated queries.
 
-Build and run the C# application:
+### Interacting with OpenAI
+
+Start a Dapr sidecar with the OpenAI component:
 
 ```bash
-cd csharp
-dotnet build
-dapr run --app-id test-csharp --resources-path ../components --dapr-http-port 3500 -- dotnet run
+dapr run --app-id test-openai --resources-path ./components --dapr-http-port 3500 -- tail -f
 ```
 
-**Expected Outcome**: The C# application sends a simple query through the Dapr Conversation API and displays the LLM's response. Note that the same code would work with any configured provider - you could switch from OpenAI to Anthropic, AWS Bedrock, or any other supported provider by simply changing the component configuration, with no application code changes required.
+Send a request using the HTTP API as shown in [`http/test.rest`](./http/test.rest):
 
-## 3. Using Secure Configurations with Secret Store
+```http
+POST http://localhost:3500/v1.0-alpha1/conversation/openai/converse
+Content-Type: application/json
 
-This example demonstrates how to securely manage API keys in production environments.
+{
+  "inputs": [
+    {
+      "content": "What is Dapr in one sentence?"
+    }
+  ]
+}
+```
+
+**Expected Outcome**: OpenAI will respond with a concise definition of Dapr, demonstrating that your application is now using a real LLM provider with the same API you used for the Echo component.
+
+## 3. Enterprise-Grade Security for LLM Access
+
+For production environments, embedding API keys directly in component files is not secure. Dapr's secret store integration allows you to store sensitive information securely and reference it from your components.
 
 ### Configuration
 
-The secure component in `components/secure.yaml` uses a secret store:
+The secure component in [`components/secure-component.yaml`](./components/secure-component.yaml) references a secret store:
 
 ```yaml
 apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:
-  name: secure
+  name: secure-model
 spec:
   type: conversation.openai
   version: v1
@@ -121,52 +135,74 @@ auth:
   secretStore: localsecretstore
 ```
 
-The secret store is configured in `components/localsecretstore.yaml` and reads secrets from `components/secrets.json`.
+The secret store configuration in [`components/localsecretstore.yaml`](./components/localsecretstore.yaml):
 
-### Running the Secure App
+```yaml
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: localsecretstore
+spec:
+  type: secretstores.local.file
+  version: v1
+  metadata:
+  - name: secretsFile
+    value: ./components/secrets.json
+  - name: nestedSeparator
+    value: ":"
+  scopes:
+    - secure-app
+```
 
-Start a Dapr sidecar with the secure component, using the appropriate app-id to match the scope:
+For local development, we're using a local file secret store that reads from [`components/secrets.json`](./components/secrets.json), but in production, this could be replaced with Azure Key Vault, AWS Secrets Manager, HashiCorp Vault, or other enterprise secret providers without changing your application code.
+
+### Using the .NET SDK with PII Protection
+
+The C# application demonstrates accessing the secure component and protecting personally identifiable information (PII). Because of the `scopes` configuration, only applications with the `secure-app` ID can access this component, providing granular access control.
+
+First, build the .NET application:
 
 ```bash
-dapr run --app-id secure-app --resources-path ./components --dapr-http-port 3500 -- tail -f
+cd csharp
+dotnet build
+cd ..
 ```
 
-### Interacting with the Secure Component with PII Scrubbing
+Then run the Dapr sidecar with the application (note that we run from the project root as secret file locations are relative):
 
-```http
-POST http://localhost:3500/v1.0-alpha1/conversation/secure/converse
-Content-Type: application/json
+```bash
+dapr run --app-id secure-app --resources-path ./components --dapr-http-port 3500 -- dotnet run --project ./csharp
+```
 
+The application code in [`csharp/Program.cs`](./csharp/Program.cs) shows how to:
+1. Use the Dapr Conversation SDK
+2. Set up PII scrubbing to automatically redact sensitive information
+3. Configure conversation parameters like temperature
+
+```csharp
+// Create conversation options with PII scrubbing and temperature
+var options = new ConversationOptions
 {
-  "inputs": [
-    {
-      "content": "Can you extract the domain name from this email john.doe@example.com ? If you cannot, make up an email address and return that",
-      "role": "user",
-      "scrubPII": true
-    }
-  ],
-  "scrubPII": true,
-  "temperature": 0.5
-}
+  ScrubPII = true,
+  Temperature = 0.5
+};
+
+// Send a request to the secure component
+var response = await conversationClient.ConverseAsync(
+  ConversationComponentName,
+  [new(prompt, DaprConversationRole.Generic)],
+  options);
 ```
 
-**Expected Outcome**:
-1. The email address in the input is automatically redacted to `<EMAIL_ADDRESS>` before being sent to the LLM
-2. The LLM provides a response without seeing the actual email
-3. If you try to call this component from a different app-id (not `secure-app`), the request will be denied
+**Expected Outcome**: The application will send a message containing an email address, which gets automatically redacted before being sent to OpenAI. The API key is securely retrieved from the secret store, and only the authorized application (`secure-app`) can access this component.
 
-This demonstrates Dapr's ability to:
-- Securely manage API keys using secret stores
-- Scope components to specific applications for controlled access
-- Automatically protect PII data in transit
+## 4. Building Resilient LLM Interactions
 
-## 4. Implementing Resiliency Patterns
-
-LLM services are prone to failures like rate limiting, timeouts, and service disruptions. Dapr's built-in resiliency features help manage these issues.
+LLM services can be unreliable due to rate limits, temporary outages, or network issues. Dapr's resiliency features help you handle these challenges without writing complex error handling code.
 
 ### Configuration
 
-The resiliency configuration in `components/resiliency.yaml`:
+The resiliency configuration in [`components/resiliency.yaml`](./components/resiliency.yaml) defines policies for timeouts, retries, and circuit breaking:
 
 ```yaml
 apiVersion: dapr.io/v1alpha1
@@ -201,20 +237,20 @@ spec:
           circuitBreaker: llm-circuit-breaker
 ```
 
-**Expected Behavior**:
-- **Timeouts**: If OpenAI takes longer than 60 seconds to respond, Dapr will terminate the request
-- **Retries**: If OpenAI returns common error codes (429, 500, 502-504), Dapr will automatically retry the request with exponential backoff
-- **Circuit Breaking**: After 5 consecutive failures, Dapr will "open the circuit" for 5 minutes, preventing further requests that would likely fail
+This configuration:
+- Sets a 60-second timeout for LLM requests
+- Automatically retries on common error codes (429 for rate limits, 5xx for server errors) with exponential backoff
+- Implements a circuit breaker that opens after 5 consecutive failures, preventing cascading failures during outages
 
-These resiliency patterns are applied automatically when running the `secure-app` from the previous section - the application code doesn't need to implement any retry logic, timeout management, or circuit breaking.
+No application code changes are needed to benefit from this resiliency - Dapr handles it automatically when you run your application with these configurations. These policies would be triggered if the LLM API becomes unavailable or experiences issues.
 
-## 5. Enabling Distributed Tracing
+## 5. Gaining Operational Visibility with Distributed Tracing
 
-For monitoring and debugging production applications, distributed tracing is essential.
+To monitor LLM interactions in production, you need visibility into request flow, latency, and errors. Dapr's distributed tracing integrates with your existing observability stack.
 
 ### Configuration
 
-The tracing configuration in `components/tracing-config.yaml`:
+The tracing configuration in [`components/tracing-config.yaml`](./components/tracing-config.yaml):
 
 ```yaml
 apiVersion: dapr.io/v1alpha1
@@ -229,31 +265,95 @@ spec:
       endpointAddress: "http://localhost:9411/api/v2/spans"
 ```
 
+When running Dapr locally with the CLI, Zipkin is already started for you, making it easy to explore traces of your application's interactions with LLMs.
+
 ### Running with Tracing Enabled
 
-Start a Dapr sidecar with tracing enabled:
+Start the Dapr sidecar with tracing enabled and a specific metrics port:
 
 ```bash
-dapr run --app-id test-tracing --resources-path ./components --dapr-http-port 3500 --config=./components/tracing-config.yaml -- tail -f
+dapr run --app-id secure-app --resources-path ./components --dapr-http-port 3500 --config=./components/tracing-config.yaml --metrics-port 9090 -- tail -f
 ```
 
-**Expected Outcome**: With tracing enabled, all Conversation API calls will generate spans that are sent to Zipkin (or another configured tracing backend). This provides visibility into:
-- Request latency (how long each LLM call takes)
-- Request flow (the path of the request through your system)
-- Errors and their causes
+You can explore traces in Zipkin at:
+```
+http://localhost:9411/zipkin/
+```
 
-This integration with standard observability tools ensures that your LLM operations can be monitored alongside the rest of your distributed system components.
+This provides visibility into every conversation request, showing exactly how long each step takes and identifying any bottlenecks or errors in your LLM processing pipeline.
+
+## 6. Monitoring LLM Operations with Metrics
+
+Beyond traces, Dapr provides detailed metrics for LLM operations that you can monitor with standard tools like Prometheus.
+
+### Configuration
+
+The Prometheus configuration in [`components/prometheus.yml`](./components/prometheus.yml):
+
+```yaml
+global:
+  scrape_interval:     5s # By default, scrape targets every 15 seconds.
+
+# A scrape configuration containing exactly one endpoint to scrape:
+# Here it's Prometheus itself.
+scrape_configs:
+  - job_name: 'dapr'
+    scrape_interval: 5s
+
+    static_configs:
+      - targets: ['host.docker.internal:9090']  # This allows Docker container to access host
+```
+
+### Running Prometheus for Metrics Collection
+
+With the setup from step 5 still running, start Prometheus in a separate terminal:
+
+```bash
+docker run -p 9099:9099 \
+    -v $(pwd)/components/prometheus.yml:/etc/prometheus/prometheus.yml \
+    prom/prometheus --config.file=/etc/prometheus/prometheus.yml --web.listen-address=:9099
+```
+
+### Exploring LLM Metrics
+
+Access the Prometheus UI at:
+```
+http://localhost:9099/query
+```
+
+Try these useful queries:
+
+1. **Request Rate Over Time**:
+   ```
+   rate(dapr_http_server_request_count{app_id="secure-app"}[1m])
+   ```
+   Shows the rate of incoming requests per minute, great for demonstrating traffic patterns.
+
+   ![metrics-request-rate](images/metrics-request-rate.png)
+
+2. **HTTP Endpoint Latency Comparison**:
+   ```
+   rate(dapr_http_server_latency_sum{app_id="secure-app"}[5m]) / rate(dapr_http_server_latency_count{app_id="secure-app"}[5m])
+   ```
+   This compares response times across different endpoints.
+
+   ![http-latency](images/http-latency.png)
+
+These metrics integrate with your existing observability stack, allowing operations teams to monitor LLM interactions alongside the rest of your application infrastructure without building specialized monitoring solutions.
 
 ## Summary
 
 The Dapr Conversation API solves the common challenges of LLM integration:
 
-1. **Provider Abstraction**: Write once, deploy with any LLM provider
-2. **Security**: Protect API keys and sensitive data with built-in capabilities
-3. **Reliability**: Handle common failure modes automatically with resiliency policies
-4. **Performance Optimization**: Reduce costs and latency with caching
-5. **Observability**: Monitor LLM operations with industry-standard tools
+1. **Provider Abstraction**: Write once, deploy with any LLM provider (OpenAI, Anthropic, AWS Bedrock, and more)
+2. **Security**: Protect API keys and sensitive data with built-in capabilities and secret store integration
+3. **Reliability**: Handle common failure modes automatically with resiliency policies (timeouts, retries, circuit breakers)
+4. **Performance Optimization**: Reduce costs and latency with built-in caching for repeated prompts
+5. **PII Protection**: Automatically scrub sensitive data before it reaches external LLM providers
+6. **Observability**: Monitor LLM operations with industry-standard tools for traces and metrics
 
-By leveraging Dapr, you can focus on building LLM-powered applications while Dapr handles the complex cross-cutting concerns that are essential for production deployments.
+By leveraging Dapr, you can focus on building LLM-powered applications while Dapr handles the complex cross-cutting concerns that are essential for production deployments. All of this is implemented in a consistent way across different programming languages and environments.
 
-For more details on the architecture and capabilities, see the companion blog post: "Building Reliable LLM Applications with Dapr Conversation API".
+For more details on the architecture and capabilities, see the companion blog post: "Operationalizing LLM Interactions with Dapr's New Conversation API".
+
+Have questions or need help? Join the [Dapr Discord community](https://bit.ly/dapr-discord) to connect with the team and other Dapr users!

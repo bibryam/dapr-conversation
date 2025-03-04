@@ -25,7 +25,7 @@ Content-Type: application/json
 }
 
 ### Secure OpenAI message
-POST http://localhost:3500/v1.0-alpha1/conversation/secure/converse
+POST http://localhost:3500/v1.0-alpha1/conversation/secure-model/converse
 Content-Type: application/json
 
 {

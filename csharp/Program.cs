@@ -1,12 +1,13 @@
+using Dapr.AI.Conversation;
 using Dapr.AI.Conversation.Extensions;
 
 class Program
 {
-  private const string ConversationComponentName = "echo";
+  private const string ConversationComponentName = "secure-model";
 
   static async Task Main(string[] args)
   {
-    const string prompt = "What is Dapr in one sentence?";
+    const string prompt = "Can you extract the domain name from this email john.doe@example.com ? If you cannot, make up an email address and return that";
 
     var builder = WebApplication.CreateBuilder(args);
     builder.Services.AddDaprConversationClient();
@@ -17,8 +18,18 @@ class Program
 
     try
     {
+      // Create conversation options with PII scrubbing and temperature
+      var options = new ConversationOptions
+      {
+        ScrubPII = true,
+        Temperature = 0.5
+      };
+
       // Send a request to the echo mock LLM component
-      var response = await conversationClient.ConverseAsync(ConversationComponentName, [new(prompt, DaprConversationRole.Generic)]);
+      var response = await conversationClient.ConverseAsync(
+        ConversationComponentName,
+        [new(prompt, DaprConversationRole.Generic)],
+        options);
       Console.WriteLine("Input sent: " + prompt);
 
       if (response != null)
